@@ -1,0 +1,348 @@
+from flask import Flask, request, redirect, session, url_for, render_template_string, Response
+import spotipy
+from spotipy.oauth2 import SpotifyOAuth
+import time
+
+# Flask app setup
+app = Flask(__name__)
+app.secret_key = 'your_hardcoded_secret_key_here'
+
+# Spotify API credentials setup
+scope = "playlist-modify-private playlist-modify-public"
+client_id = "ee6ed9eca5cc4e628a9fd9240d6ee33d"
+client_secret = "3e191fac74f4414bb15edf13f6c974c7"
+redirect_uri = "http://Gjoel57.pythonanywhere.com/callback"
+
+def create_spotify_oauth():
+    return SpotifyOAuth(scope=scope, client_id=client_id, client_secret=client_secret, redirect_uri=redirect_uri)
+
+def get_spotify_client():
+    if 'token_info' not in session:
+        return redirect(url_for('login'))
+    token_info = session['token_info']
+    if time.time() > token_info['expires_at']:
+        sp_oauth = create_spotify_oauth()
+        token_info = sp_oauth.refresh_access_token(token_info['refresh_token'])
+        session['token_info'] = token_info
+    return spotipy.Spotify(auth=token_info['access_token'])
+
+@app.route('/')
+def index():
+    # Use 'latest_artist_songs' to display songs from the most recently added artist
+    songs_list = session.get('latest_artist_songs', [])
+    playlist_creation_message = session.pop('playlist_creation_message', None)
+    artist_error_message = session.pop('artist_error_message', None)  # Retrieve and clear the artist error message
+    return render_template_string('''
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spotify Playlist Creator</title>
+    <style>
+        html, body {
+        margin: 0;
+        padding: 0;
+        font-family: Arial, sans-serif;
+        background-color: #1DB954; /* Green background */
+    }
+
+    .main-container {
+        display: flex;
+        justify-content: center;
+        align-items: flex-start; /* Align items to the top */
+        padding: 20px;
+        min-height: 100vh; /* Minimum height of 100% of the viewport height */
+        background-color: #1DB954; /* Green background */
+    }
+
+    .instructions, .form-and-songs-container {
+        background-color: #fff;
+        border-radius: 5px;
+        margin: 10px;
+        padding: 20px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+    }
+
+    .instructions {
+        width: 30%;
+    }
+
+    .form-and-songs-container {
+        width: 40%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .songs-list {
+        background-color: #000;
+        color: #fff;
+        width: 100%;
+        margin-top: 20px;
+        border-radius: 5px;
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        padding: 20px; /* To match the padding of the form */
+    }
+
+    .instructions {
+        background-color: #FFF; /* White background for the instructions */
+        padding: 20px; /* Padding inside the instructions */
+        border-radius: 8px; /* Rounded corners for aesthetics */
+        max-width: 500px; /* Maximum width of the instructions */
+        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1); /* Soft shadow for depth */
+        margin-bottom: 20px; /* Space below the instructions */
+    }
+    .spotify-logo {
+        align-self: center;
+        margin-bottom: 20px;
+    }
+    .spotify-logo img {
+        max-width: 150px;
+        height: auto;
+    }
+    .input-group {
+        margin-bottom: 15px;
+    }
+    .input-group input,
+    .input-group button {
+        width: 100%;
+        padding: 10px;
+        margin-top: 5px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 18px;
+    }
+    .input-group button {
+        cursor: pointer;
+        background-color: #1DB954;
+        color: white;
+        border: none;
+        font-size: 24px;
+        padding: 20px;
+    }
+    .label {
+        display: block;
+        text-align: center;
+        font-size: 24px;
+        margin-top: 20px;
+        margin-bottom: 10px;
+    }
+    .site-footer {
+        text-align: center;
+        width: 100%;
+        color: #fff; /* White text */
+        font-size: 12px;
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        padding: 10px;
+    }
+
+    body {
+        position: relative;
+        min-height: 100vh;
+        margin-bottom: 30px; /* Make sure there's space for the footer */
+    }
+
+    .songs-list {
+        background-color: #000; /* Black background */
+        color: #fff; /* White text */
+        padding: 20px;
+        border-radius: 10px;
+        width: 80%;
+        max-width: 700px;
+        margin: 20px auto;
+        box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+    }
+    .songs-list h3 {
+        text-align: center;
+    }
+    .songs-list ul {
+        list-style-type: none;
+        padding: 0;
+    }
+    .songs-list li {
+        padding: 5px 0;
+        border-bottom: 1px solid #222;
+    }
+    .playlist-creation-message {
+    background-color: #000; /* Black background */
+    color: #fff; /* White text */
+    padding: 20px;
+    border-radius: 10px;
+    margin: 20px 0; /* Add margin above and below the message */
+    box-shadow: 0px 4px 8px rgba(0, 0, 0, 0.1);
+}
+    </style>
+</head>
+<body>
+    <div class="main-container">
+        <div class="instructions">
+            <h2>Let's Make Your Personalised Playlist!</h2>
+            <ol>
+                <li>
+                    <strong>Select Your Artists:</strong>
+                    <ul>
+                        <li>Type an artist's name in the 'Enter artist name' box.</li>
+                        <li>Click 'Add Artist' to include them in your playlist.</li>
+                    </ul>
+                </li>
+                <li>
+                    <strong>Finalise Your Playlist:</strong>
+                    <ul>
+                        <li>Once you're done adding artists, give your playlist a name in the 'Enter playlist name' box.</li>
+                        <li>Remember, after you set the playlist name, no more artists can be added. Make sure your list is complete!</li>
+                    </ul>
+                </li>
+                <li>
+                    <strong>Create Your Playlist:</strong>
+                    <ul>
+                        <li>Press 'Create Playlist' to combine your selected artists into a new Spotify playlist.</li>
+                    </ul>
+                </li>
+            </ol>
+        </div>
+        <div class="form-and-songs-container">
+            {% if playlist_creation_message %}
+            <div class="playlist-creation-message">
+                {{ playlist_creation_message }}
+            </div>
+            {% endif %}
+            <div class="spotify-logo">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/8/84/Spotify_icon.svg/1200px-Spotify_icon.svg.png" alt="Spotify Logo">
+            </div>
+            <form id="add-artist-form" action="/add-artist" method="post">
+                <div class="input-group">
+                    <label class="label" for="artist_name">Enter artist name:</label>
+                    <input type="text" id="artist_name" name="artist_name">
+                    <button type="submit" class="button">Add Artist</button>
+                </div>
+            </form>
+            <form id="create-playlist-form" action="/create-playlist" method="post">
+                <div class="input-group">
+                    <label class="label" for="playlist_name">Enter playlist name:</label>
+                    <input type="text" id="playlist_name" name="playlist_name">
+                    <button type="submit" class="button">Create Playlist</button>
+                </div>
+            </form>
+        </div>
+        <div class="pls work">
+        {% if songs_list %}
+            <div class="songs-list">
+                <h3>Added Songs:</h3>
+                <ul>
+                {% for title in songs_list %}
+                    <li>{{ title }}</li>
+                {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+        {% if artist_error_message %}
+    <div class="error-message">
+        {{ artist_error_message }}
+    </div>
+{% endif %}
+
+    </div>
+        <footer class="site-footer">
+        <small>Made by Joel Gibson © All rights belong to Spotify</small>
+    </footer>
+</body>
+</html>
+
+
+    ''', songs_list=songs_list, playlist_creation_message=playlist_creation_message)
+
+
+@app.route('/add-artist', methods=['POST'])
+def add_artist():
+    print("Adding artist...")
+    sp_client_response = get_spotify_client()
+    if isinstance(sp_client_response, Response):
+        print("Redirecting due to Response instance...")
+        return sp_client_response
+
+    artist_name = request.form['artist_name']
+    results = sp_client_response.search(q='artist:' + artist_name, type='track', limit=10)
+    tracks = results['tracks']['items']
+
+    if not tracks:
+        print(f"No tracks found for artist: {artist_name}")
+        session['artist_error_message'] = f"Artist '{artist_name}' not found."
+    else:
+        session.setdefault('artists', []).append(artist_name)
+        latest_artist_songs = [track['name'] for track in tracks]
+        session['latest_artist_songs'] = latest_artist_songs
+        session.pop('artist_error_message', None)
+
+    session.modified = True
+    return redirect('/')
+
+
+
+
+@app.route('/create-playlist', methods=['POST'])
+def create_playlist():
+    sp_client_response = get_spotify_client()
+    if isinstance(sp_client_response, Response):
+        return sp_client_response
+
+    playlist_name = request.form['playlist_name']
+    artist_names = session.get('artists', [])
+    all_song_uris = []
+
+    for artist_name in artist_names:
+        results = sp_client_response.search(q='artist:' + artist_name, type='track', limit=10)
+        tracks = results['tracks']['items']
+        for track in tracks:
+            all_song_uris.append(track['uri'])
+
+    if all_song_uris:
+        user_id = sp_client_response.current_user()['id']
+        playlist = sp_client_response.user_playlist_create(user=user_id, name=playlist_name, public=False)
+        sp_client_response.playlist_add_items(playlist_id=playlist['id'], items=all_song_uris)
+
+        # Prepare and store the playlist creation message
+        session['playlist_creation_message'] = f"Playlist '{playlist_name}' created with {len(all_song_uris)} songs from {len(artist_names)} artists!"
+
+        # Clear the artists and songs from session to reset memory
+        session.pop('artists', None)
+        session.pop('song_titles', None)  # Ensure this is the correct key used for storing song titles
+        session.pop('latest_artist_songs', None)  # If you're using this key as per previous instructions
+
+        session.modified = True
+    else:
+        session['playlist_creation_message'] = "No songs found for the given artists."
+
+    return redirect('/')
+
+
+
+@app.route('/login')
+def login():
+    sp_oauth = create_spotify_oauth()
+    auth_url = sp_oauth.get_authorize_url()
+    return redirect(auth_url)
+
+def create_spotify_oauth():
+    return SpotifyOAuth(
+        scope=scope,
+        client_id=client_id,
+        client_secret=client_secret,
+        redirect_uri=redirect_uri,
+        cache_path=None  # This disables caching
+    )
+
+
+@app.route('/callback')
+def callback():
+    sp_oauth = create_spotify_oauth()
+    code = request.args.get('code')
+    token_info = sp_oauth.get_access_token(code)
+    session['token_info'] = token_info
+    return redirect(url_for('index'))
+
+if __name__ == '__main__':
+    app.run(debug=True)
+
+
